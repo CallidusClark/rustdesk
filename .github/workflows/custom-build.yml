@@ -1,0 +1,33 @@
+# Custom RustDesk client build — manual trigger.
+#
+# This is a thin wrapper around upstream's flutter-build.yml, which is the
+# same workflow rustdesk/rustdesk uses for its own nightly and tagged releases.
+# Modeled on .github/workflows/flutter-nightly.yml but without the cron — we
+# only build when manually triggered, to keep GitHub Actions usage low.
+#
+# Drop this into a fork of rustdesk/rustdesk at
+# .github/workflows/custom-build.yml, set the three repository secrets
+# (RENDEZVOUS_SERVER, RS_PUB_KEY, API_SERVER), and trigger from the Actions
+# tab. flutter-build.yml reads those secrets and bakes them into the binary
+# at compile time.
+#
+# See ../README.md (in rustdesk-hetzner) for setup steps and the values our
+# secrets should hold.
+
+name: Custom RustDesk build
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload-tag:
+        description: "Tag name for the release (artifacts only — no upload to GitHub Releases unless you customize flutter-build.yml)"
+        required: false
+        default: "custom"
+
+jobs:
+  build:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: ${{ inputs.upload-tag }}
