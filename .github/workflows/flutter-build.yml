@@ -44,6 +44,7 @@ env:
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
   MACOS_P12_BASE64: "${{ secrets.MACOS_P12_BASE64 }}"
+  MACOS_NOTARIZE_JSON: "${{ secrets.MACOS_NOTARIZE_JSON }}"
   # Custom-server build: these get baked into the binary at compile time.
   # Mirrors what playground.yml does. Without these lines, repo secrets exist
   # but never reach the build environment.
@@ -609,7 +610,7 @@ jobs:
           security find-identity -v
 
       - name: Import notarize key
-        if: env.MACOS_P12_BASE64 != null
+        if: env.MACOS_P12_BASE64 != null && env.MACOS_NOTARIZE_JSON != ''
         uses: timheuer/base64-to-file@v1.2
         with:
           # https://gregoryszorc.com/docs/apple-codesign/stable/apple_codesign_rcodesign.html#notarizing-and-stapling
@@ -618,7 +619,7 @@ jobs:
           encodedString: ${{ secrets.MACOS_NOTARIZE_JSON }}
 
       - name: Install rcodesign tool
-        if: env.MACOS_P12_BASE64 != null
+        if: env.MACOS_P12_BASE64 != null && env.MACOS_NOTARIZE_JSON != ''
         shell: bash
         run: |
           pushd /tmp
@@ -757,8 +758,12 @@ jobs:
           codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ./flutter/build/macos/Build/Products/Release/RustDesk.app -vvv
           create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
           codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict rustdesk-${{ env.VERSION }}.dmg -vvv
-          # notarize the rustdesk-${{ env.VERSION }}.dmg
-          rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json  --staple rustdesk-${{ env.VERSION }}.dmg
+          # notarize the rustdesk-${{ env.VERSION }}.dmg — only when MACOS_NOTARIZE_JSON is set
+          if [ -n "${{ env.MACOS_NOTARIZE_JSON }}" ]; then
+            rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json --staple rustdesk-${{ env.VERSION }}.dmg
+          else
+            echo "Skipping notarization — MACOS_NOTARIZE_JSON not set (self-signed cert build)."
+          fi
 
       - name: Rename rustdesk
         if: env.UPLOAD_ARTIFACT == 'true'
