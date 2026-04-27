@@ -240,6 +240,43 @@ jobs:
           name: rustdesk-unsigned-windows-${{ matrix.job.arch }}
           path: rustdesk
 
+      - name: Sign rustdesk binaries with self-signed cert
+        if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
+        shell: pwsh
+        run: |
+          # The macOS .p12 cert (legacy-format) also signs Windows binaries.
+          # Decode to a temporary .pfx and use signtool from the Windows SDK.
+          $p12Bytes = [Convert]::FromBase64String("${{ secrets.MACOS_P12_BASE64 }}")
+          $pfxPath = "$env:RUNNER_TEMP\rustdesk-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $p12Bytes)
+
+          # Resolve signtool.exe (latest Windows SDK on the runner).
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like '*\x64\signtool.exe' } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found on runner" }
+          Write-Host "Using signtool: $($signtool.FullName)"
+
+          # Sign rustdesk.exe and librustdesk.dll. Other plugin DLLs are 3rd-party
+          # and signing them with our cert would be misleading.
+          $targets = @(
+            'rustdesk\rustdesk.exe',
+            'rustdesk\librustdesk.dll'
+          ) | Where-Object { Test-Path $_ }
+
+          foreach ($t in $targets) {
+            & $signtool.FullName sign /f $pfxPath /p "${{ secrets.MACOS_P12_PASSWORD }}" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $t
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed on $t" }
+          }
+          Remove-Item $pfxPath
+
+      - name: Upload signed Windows folder
+        if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
+        uses: actions/upload-artifact@master
+        with:
+          name: rustdesk-signed-windows-${{ matrix.job.arch }}
+          path: rustdesk
+
       - name: Sign rustdesk files
         if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '-2'
         shell: bash
