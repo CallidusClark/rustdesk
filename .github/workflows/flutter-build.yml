@@ -794,28 +794,16 @@ jobs:
           rm -rf *.dmg || true
           APP="./flutter/build/macos/Build/Products/Release/RustDesk.app"
           IDENTITY="${{ secrets.MACOS_CODESIGN_IDENTITY }}"
-          # Inside-out signing.
-          # First, find every Mach-O file (executables and dylibs) inside the bundle
-          # by file magic, not by name. This catches helpers like Contents/MacOS/service
-          # that have no extension and aren't the bundle's main executable.
-          # Sign innermost paths first (sort -r so deeper paths come first).
-          while IFS= read -r -d '' f; do
-            if file -b "$f" | grep -q "Mach-O"; then
-              codesign --force --options runtime -s "$IDENTITY" --timestamp=none "$f"
-            fi
-          done < <(find "$APP" -type f -print0 | tr '\0' '\n' | sort -r | tr '\n' '\0')
-          # Then sign every nested bundle (frameworks, xpc, helper apps), deepest first.
-          while IFS= read -r -d '' d; do
-            if [ "$d" != "$APP" ]; then
-              codesign --force --options runtime -s "$IDENTITY" --timestamp=none "$d"
-            fi
-          done < <(find "$APP" -type d \( -name "*.framework" -o -name "*.xpc" -o -name "*.app" -o -name "*.bundle" \) -print0 | tr '\0' '\n' | sort -r | tr '\n' '\0')
-          # Finally sign the outer .app.
-          codesign --force --options runtime -s "$IDENTITY" --timestamp=none "$APP" -vvv
+          # build.py copies a Rust-built `service` binary into Contents/MacOS/
+          # AFTER Flutter has sealed the bundle. --deep --force walks every Mach-O
+          # and framework, replacing existing signatures (including ad-hoc Flutter
+          # ones), so all components end up with our identity. --deep is deprecated
+          # for notarization but fine for self-signed code that we don't notarize.
+          codesign --force --deep --options runtime -s "$IDENTITY" --timestamp=none "$APP" -vvv
           # Verify — fails the build if anything is inconsistent.
           codesign --verify --deep --strict --verbose=2 "$APP"
           create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}.dmg "$APP"
-          codesign --force --options runtime -s "$IDENTITY" --timestamp=none rustdesk-${{ env.VERSION }}.dmg -vvv
+          codesign --force --deep --options runtime -s "$IDENTITY" --timestamp=none rustdesk-${{ env.VERSION }}.dmg -vvv
           # notarize the rustdesk-${{ env.VERSION }}.dmg — only when MACOS_NOTARIZE_JSON is set
           if [ -n "${{ env.MACOS_NOTARIZE_JSON }}" ]; then
             rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json --staple rustdesk-${{ env.VERSION }}.dmg
